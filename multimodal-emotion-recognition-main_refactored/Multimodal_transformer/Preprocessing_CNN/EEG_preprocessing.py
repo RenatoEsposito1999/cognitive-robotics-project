@@ -1,52 +1,46 @@
 import torch
 import torch.nn as nn
-from torch import fft
-
 
 class EEGCNNPreprocessor(nn.Module):
-    def __init__(self, num_channels=14, d_model=128, cnn_out_channels=32):
+    def __init__(self, num_channels=14, d_model=128, cnn_out_channels=128):
         super(EEGCNNPreprocessor, self).__init__()
         self.d_model = d_model
 
-        # CNN layers
+        # Spatial CNN
         self.cnn = nn.Sequential(
-            nn.Conv2d(1, 32, kernel_size=(1, 5), stride=1, padding=(0, 2)),
+            nn.Conv2d(1, 32, kernel_size=(num_channels, 1), stride=1, padding=(0, 0)),
             nn.ReLU(),
             nn.Conv2d(32, 64, kernel_size=(1, 5), stride=1, padding=(0, 2)),
             nn.ReLU(),
-            nn.Conv2d(64, cnn_out_channels, kernel_size=(1, 5), stride=1, padding=(0, 2)),
-            nn.ReLU(),
-            nn.AdaptiveAvgPool2d((1, d_model))  # Final spatial pooling
+            nn.Conv2d(64, d_model, kernel_size=(1, 5), stride=1, padding=(0, 2)),
+            nn.ReLU()
         )
 
-        self.fft_projector = nn.Linear(d_model,d_model)
+        # Temporal Convolution
+        self.temporal_conv = nn.Conv2d(d_model, d_model, kernel_size=(1, 5), stride=1, padding=(0, 2))
+        
+        # Residual Connection
+        self.residual = nn.Conv2d(1, cnn_out_channels, kernel_size=(num_channels, 1))
 
+        # Adaptive Pooling for d_model alignment
+        self.pool = nn.AdaptiveAvgPool2d((None, d_model))
 
     def forward(self, x):
         """
         Args:
-            x: EEG input tensor of shape (batch_size, num_channels, seq_length).
-               num_channels: number of EEG channels (e.g., 14)
-               seq_length: number of timesteps per channel.
+            x: EEG input tensor of shape (batch_size, seq_length, num_channels).
         Returns:
             Processed EEG features: shape (batch_size, seq_length, d_model).
         """
+        x = x.permute(0, 2, 1).unsqueeze(1)  # Reshape to (batch_size, 1, num_channels, seq_length)
         
-        # Apply CNN for spatial feature extraction
-        cnn_input = x.unsqueeze(1)  # Add a channel dimension for CNN (B, 1, C, T)
-        cnn_features = self.cnn(cnn_input).squeeze(2)  # (B, cnn_out_channels, seq_length)
-
-        # Apply FFT along the time axis
-        fft_features = fft.rfft(x, dim=-1)  # (B, num_channels, freq_bins)
-        fft_magnitude = torch.abs(fft_features)  # Magnitude spectrum (B, num_channels, freq_bins)
-
-        # Average across the frequency bins to reduce dimensionality and align with CNN output
-        fft_magnitude = fft_magnitude.mean(dim=-1)  # (B, num_channels)
-
-        # Project FFT features to match cnn_out_channels
-        fft_projected = self.fft_projector(fft_magnitude)  # (B, seq_length, d_model)
-
-        # Combine CNN features and FFT features
-        final_features = cnn_features + fft_projected  # (B, seq_length, d_model)
-       
+        residual = self.residual(x)  # Residual connection
+        cnn_features = self.cnn(x)
+        temporal_features = self.temporal_conv(cnn_features)  # Temporal convolution
+        cnn_features = cnn_features + temporal_features  # Combine features
+        cnn_features += residual  # Add residual
+        
+        cnn_features = cnn_features.squeeze(2)  # Remove channel dimension
+        final_features = self.pool(cnn_features)  # Align to d_model
+        
         return final_features

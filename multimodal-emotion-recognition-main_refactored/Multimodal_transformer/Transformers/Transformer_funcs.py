@@ -140,7 +140,7 @@ class EEGTransformerEncoder(nn.Module):
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         
 
-    def forward(self, x, mask, device):
+    def forward(self, x, device):
         """
         Forward pass for the EEG Transformer Encoder model.
 
@@ -148,31 +148,9 @@ class EEGTransformerEncoder(nn.Module):
             x: Tensor of shape (batch_size, sequence_length, d_features)
         """
 
-        #x = self.feature_projection(x) # x : [batchsize, sequence_length,d_model]
-
-        #positional_encoding = self._generate_positional_encoding(x.size(1), self.d_model)
-        #positional_encoding = positional_encoding.to(device)
-        # Add positional encoding
-        #x = x + positional_encoding[:,:x.size(1),:]
-
-        #(Idea): positional encoding could affect the learning, testing is necessary
-
         # Pass through transformer encoder
         
         x = self.transformer_encoder(x)
 
         # Return the final embedding
         return x.mean(dim=1)  # Aggregates across time steps to get a fixed-size embedding
-
-    def _generate_positional_encoding(self, length, d_model):
-        """
-        Generates a positional encoding matrix of shape (length, d_model).
-        """
-        pe = torch.zeros(length, d_model)
-        position = torch.arange(0, length, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
-        
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        
-        return pe.unsqueeze(0)  # Add a batch dimension
