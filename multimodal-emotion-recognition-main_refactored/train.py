@@ -60,7 +60,7 @@ def train_epoch_multimodal(epoch, data_loader_audio_video, model, criterion_loss
 
         targets = Variable(targets)
         
-        logits_output = model(audio_inputs, visual_inputs, EEG_inputs, opt.device)
+        logits_output,aux_eeg_logits = model(audio_inputs, visual_inputs, EEG_inputs, opt.device)
        
         total_loss = criterion_loss(logits_output, targets)
                

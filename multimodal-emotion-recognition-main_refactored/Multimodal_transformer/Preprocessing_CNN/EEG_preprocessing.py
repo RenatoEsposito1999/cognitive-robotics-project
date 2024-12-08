@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torch import fft
 
 
 class EEGCNNPreprocessor(nn.Module):
@@ -9,47 +10,43 @@ class EEGCNNPreprocessor(nn.Module):
 
         # CNN layers
         self.cnn = nn.Sequential(
-            nn.Conv1d(in_channels=num_channels, out_channels=cnn_out_channels, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(1, 32, kernel_size=(1, 5), stride=1, padding=(0, 2)),
             nn.ReLU(),
-            nn.BatchNorm1d(cnn_out_channels),  # Normalize CNN outputs
-            nn.MaxPool1d(2,1),
-            nn.Conv1d(in_channels=cnn_out_channels, out_channels=cnn_out_channels, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(32, 64, kernel_size=(1, 5), stride=1, padding=(0, 2)),
             nn.ReLU(),
-            nn.BatchNorm1d(cnn_out_channels),  # Normalize CNN outputs
-            nn.MaxPool1d(2,1),
-            nn.Conv1d(in_channels=cnn_out_channels, out_channels=d_model, kernel_size=3, stride=1, padding=1),
+            nn.Conv2d(64, cnn_out_channels, kernel_size=(1, 5), stride=1, padding=(0, 2)),
             nn.ReLU(),
-            nn.MaxPool1d(2,1)
+            nn.AdaptiveAvgPool2d((1, d_model))  # Final spatial pooling
         )
-        #(Idea): Removed the stride to include more temporal informations, included the maxpooling to reduce dimensionality in some way
+
+        self.fft_projector = nn.Linear(d_model,d_model)
+
 
     def forward(self, x):
         """
-        Forward pass through the CNN.
         Args:
-            x: Tensor of shape (batch_size, sequence_length, num_channels)
-            mask: Tensor of shape (batch_size, sequence_length) indicating padding.
+            x: EEG input tensor of shape (batch_size, num_channels, seq_length).
+               num_channels: number of EEG channels (e.g., 14)
+               seq_length: number of timesteps per channel.
+        Returns:
+            Processed EEG features: shape (batch_size, seq_length, d_model).
         """
         
-        """
-        Normalize the EEG input signal (z-score normalization).
-        Args:
-            x: Tensor of shape (batch_size, sequence_length, num_channels)
-        """
-        # Normalize across channels for each sample
-        #mean = x.mean(dim=1, keepdim=True)  # Mean across sequence length (time)
-        #std = x.std(dim=1, keepdim=True)  # Std across sequence length (time)
-        #x = (x - mean) / (std + 1e-6)  # Avoid division by zero
+        # Apply CNN for spatial feature extraction
+        cnn_input = x.unsqueeze(1)  # Add a channel dimension for CNN (B, 1, C, T)
+        cnn_features = self.cnn(cnn_input).squeeze(2)  # (B, cnn_out_channels, seq_length)
 
-        #(Idea): perform it on sample based not on batch
+        # Apply FFT along the time axis
+        fft_features = fft.rfft(x, dim=-1)  # (B, num_channels, freq_bins)
+        fft_magnitude = torch.abs(fft_features)  # Magnitude spectrum (B, num_channels, freq_bins)
 
-        x = x.permute(0, 2, 1)  # Change shape to (batch_size, num_channels, sequence_length)
+        # Average across the frequency bins to reduce dimensionality and align with CNN output
+        fft_magnitude = fft_magnitude.mean(dim=-1)  # (B, num_channels)
+
+        # Project FFT features to match cnn_out_channels
+        fft_projected = self.fft_projector(fft_magnitude)  # (B, seq_length, d_model)
+
+        # Combine CNN features and FFT features
+        final_features = cnn_features + fft_projected  # (B, seq_length, d_model)
        
-
-        # Pass through CNN
-        x = self.cnn(x)  # Output shape: (batch_size, d_model, reduced_sequence_length)
-        
-        # Transpose back to (batch_size, sequence_length, d_model)
-        x = x.permute(0, 2, 1)
-       
-        return x
+        return final_features
