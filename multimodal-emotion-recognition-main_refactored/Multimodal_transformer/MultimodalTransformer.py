@@ -22,7 +22,7 @@ class MultimodalTransformer(nn.Module):
             in_dim_k=self.embeds_dim, in_dim_q=self.embeds_dim, out_dim=self.embeds_dim, num_heads=num_heads
         )
 
-        self.VideoToAudio_CrossAttention = AttentionBlock(
+        self.va = AttentionBlock(
             in_dim_k=self.embeds_dim, in_dim_q=self.embeds_dim, out_dim=self.embeds_dim, num_heads=num_heads
         )
 
@@ -57,30 +57,32 @@ class MultimodalTransformer(nn.Module):
         to be substituted with the same transformer attention mechanism utilized for the other two sources.
         '''
 
-        x_audio = self.audio_preprocessing.forward_stage1(x_audio)
-        proj_x_a = self.audio_preprocessing.forward_stage2(x_audio)
-
-        x_visual = self.video_preprocessing.forward_features(x_visual) 
-        x_visual = self.video_preprocessing.forward_stage1(x_visual)
-        proj_x_v = self.video_preprocessing.forward_stage2(x_visual)
-
+        proj_x_a = self.audio_preprocessing.forward(x_audio)
+        proj_x_v = self.video_preprocessing.forward(x_visual)
         proj_x_eeg= self.EEG_preprocessing.forward(x_eeg)
 
+        # Sizes: [batch_size,seq_len,d_model]
+
+        # To check if those are necessary
         proj_x_a = proj_x_a.permute(0, 2, 1)
         proj_x_v = proj_x_v.permute(0, 2, 1)
-        
-        h_av = self.av(proj_x_v, proj_x_a)
-        h_va = self.va(proj_x_a, proj_x_v)
 
-        audio_pooled = h_av.mean([1]) #mean accross temporal dimension
-        video_pooled = h_va.mean([1])
-          
+        # Sizes: [batch_size,d_model,seq_len]
+
         eeg_features = self.EEG_Transformer.forward(proj_x_eeg, device)
-
         eeg_aux_output = self.eeg_aux_classifier(eeg_features)
 
+        proj_x_eeg = proj_x_eeg.permut(0,2,1)
+
+        audio_video_combined = self.av(proj_x_v, proj_x_a)
+        video_audio_combined = self.va(proj_x_a, proj_x_v)
+
+        audio_pooled = audio_video_combined.mean(dim=1)
+        video_pooled = video_audio_combined.mean(dim=1)
+          
+
         # New block to introduce cross attention between audio-video and eeg
-        combined_audio_video = torch.cat((h_av, h_va), dim=1)
+        combined_audio_video = torch.cat((audio_video_combined, video_audio_combined), dim=1)
         # Treat EEG as query, and combined video-audio as key-value
         eeg_attended = self.EEG_CrossAttention(combined_audio_video, proj_x_eeg)
         eeg_pooled = eeg_attended.mean(dim=1)
