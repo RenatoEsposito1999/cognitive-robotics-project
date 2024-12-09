@@ -59,13 +59,9 @@ def val_epoch_multimodal(EEGData_val, epoch, data_loader, model, criterion, opt,
             mask_inputs = Variable(mask_inputs)
             
         
-        logits_output,aux_eeg_logits  = model(inputs_audio, inputs_visual, EEG_inputs, opt.device)
+        logits_output,eeg_logits  = model(inputs_audio, inputs_visual, EEG_inputs, opt.device)
           
-        partial_loss = criterion(logits_output, targets)
-
-        eeg_loss = criterion(aux_eeg_logits,targets)
-
-        total_loss = partial_loss + 0.1 * eeg_loss
+        total_loss = criterion(logits_output, targets)
 
         prec1 = calculate_precision(logits_output.data, targets.data)
    

@@ -5,11 +5,13 @@ from Multimodal_transformer.Preprocessing_CNN.Audio_preprocessing import AudioCN
 from Multimodal_transformer.Preprocessing_CNN.EEG_preprocessing import EEGCNNPreprocessor
 from Multimodal_transformer.Preprocessing_CNN.Video_preprocessing import EfficientFaceTemporal
 
-from Multimodal_transformer.Transformers.Transformer_funcs import EEGTransformerEncoder,AttentionBlock
+# Da eliminare EEGTransformerEncoder
+from Multimodal_transformer.Transformers.Transformer_funcs import EEGTransformerEncoder, AttentionBlock
+
 
 class MultimodalTransformer(nn.Module):
-    def __init__(self,num_classes=4,seq_length=15,num_channels_eeg=14,pretr_ef='None',num_heads=1):
-        super(MultimodalTransformer,self).__init__()
+    def __init__(self, num_classes=4, seq_length=15, num_channels_eeg=14, pretr_ef='None', num_heads=1):
+        super(MultimodalTransformer, self).__init__()
 
         self.embeds_dim = 128
         self.num_channels_eeg = num_channels_eeg
@@ -26,82 +28,78 @@ class MultimodalTransformer(nn.Module):
             in_dim_k=self.embeds_dim, in_dim_q=self.embeds_dim, out_dim=self.embeds_dim, num_heads=num_heads
         )
 
-        self.EEG_Transformer = EEGTransformerEncoder(d_model=self.embeds_dim,num_heads=num_heads)
+        self.EEG_Transformer = EEGTransformerEncoder(d_model=self.embeds_dim, num_heads=num_heads)
 
         self.EEG_CrossAttention = AttentionBlock(
             in_dim_k=self.embeds_dim, in_dim_q=self.embeds_dim, out_dim=self.embeds_dim, num_heads=num_heads
         )
-        
-        self.Layer_norm = nn.LayerNorm(self.embeds_dim*3)
-        self.fc = nn.Linear(self.embeds_dim*3,num_classes)
+
+        self.Layer_norm = nn.LayerNorm(self.embeds_dim * 3)
+        self.fc = nn.Linear(self.embeds_dim * 3, num_classes)
 
         self.eeg_aux_classifier = nn.Linear(self.embeds_dim, num_classes)
 
-        self.modality_weights = nn.Parameter(torch.FloatTensor([1.0,1.0,2.0]))
- 
-        
-    def forward(self,x_audio,x_visual,x_eeg, device):
+        # Learnable parameters for modality weights (as a convex combination)
+        self.modality_weights = nn.Parameter(torch.FloatTensor([1.0, 1.0, 3.0]))
 
-        '''
-        This procedure utilizes cross-attention between audio and video to produce the embedding of the transformer. Those
-        embeds are then again attentioned through an additional cross-attention step to produce a final output used to 
-        syncronize each modality. The main elements which are included in this procedure are:
-        - Introduction of learnable weights respect to the various embeds produced.
-        - Layer normalization across the concatenation to ensure proper classification task.
-        
-        Output:
-        - main_output: logits produced by the classification obtained on the concatenation of sources.
-        - eeg_aux_output: Auxiliary output(to compute an additional loss term) derived from the EEG modality in order to identify potential issues arised by this
-        element in the attention mechanism.
+    def forward(self, x_audio, x_visual, x_eeg, device):
+        """
+        Forward pass for the multimodal transformer model.
+        Args:
+            x_audio: Audio input tensor
+            x_visual: Video input tensor
+            x_eeg: EEG input tensor
+            device: Device to use (CPU/GPU)
 
-        NOTE: In this final implementation of the cross-attetion across all the possible modalities the EEG_transformer is ignored
-        to be substituted with the same transformer attention mechanism utilized for the other two sources.
-        '''
+        Returns:
+            main_output: Final logits combining all modalities
+            eeg_aux_output: Auxiliary output for EEG modality
+        """
 
+        print(x_eeg.shape)
+        # Process audio
         x_audio = self.audio_preprocessing.forward_stage1(x_audio)
         proj_x_a = self.audio_preprocessing.forward_stage2(x_audio)
 
-        x_visual = self.video_preprocessing.forward_features(x_visual) 
+        # Process video
+        x_visual = self.video_preprocessing.forward_features(x_visual)
         x_visual = self.video_preprocessing.forward_stage1(x_visual)
         proj_x_v = self.video_preprocessing.forward_stage2(x_visual)
 
-        proj_x_eeg= self.EEG_preprocessing.forward(x_eeg)
+        # Process EEG
+        proj_x_eeg = self.EEG_preprocessing.forward(x_eeg)
+        # Attaccare qua l'autoencoder (encoding)
 
-        # Sizes: [batch_size,seq_len,d_model]
-
-        # To check if those are necessary
+        # Permute audio and video projections
         proj_x_a = proj_x_a.permute(0, 2, 1)
         proj_x_v = proj_x_v.permute(0, 2, 1)
 
-        # Sizes: [batch_size,d_model,seq_len]
-
-        eeg_features = self.EEG_Transformer.forward(proj_x_eeg, device)
-        eeg_aux_output = self.eeg_aux_classifier(eeg_features)
-
-        #proj_x_eeg = proj_x_eeg.permute(0,2,1)
-
+        # Cross-attention between audio and video
         audio_video_combined = self.av(proj_x_v, proj_x_a)
         video_audio_combined = self.va(proj_x_a, proj_x_v)
 
+        # Pool audio and video features
         audio_pooled = audio_video_combined.mean(dim=1)
         video_pooled = video_audio_combined.mean(dim=1)
-          
 
-        # New block to introduce cross attention between audio-video and eeg
+        # Pool EEG features
         combined_audio_video = torch.cat((audio_video_combined, video_audio_combined), dim=1)
-        # Treat EEG as query, and combined video-audio as key-value
         eeg_attended = self.EEG_CrossAttention(combined_audio_video, proj_x_eeg)
         eeg_pooled = eeg_attended.mean(dim=1)
 
-        # Learnable parameters for the importance of each modality (debugging utility + reguralization)
+        # Apply softmax to modality weights to ensure convex combination
+        normalized_weights = torch.softmax(self.modality_weights, dim=0)
+
+        # Weighted combination of modalities
+        # Define if necessary to tune the model or keep constant the importance of the inputs
         concat_audio_video_eeg = torch.cat((
-            self.modality_weights[0] * audio_pooled,
-            self.modality_weights[1] * video_pooled,
-            self.modality_weights[2] * eeg_pooled
+            normalized_weights[0] * audio_pooled,
+            normalized_weights[1] * video_pooled,
+            normalized_weights[2] * eeg_pooled
         ), dim=-1)
 
+        # Layer normalization and final classification
         concat_audio_video_eeg = self.Layer_norm(concat_audio_video_eeg.to(device))
-        
         main_output = self.fc(concat_audio_video_eeg)
-        
-        return main_output,eeg_aux_output
+
+        return main_output

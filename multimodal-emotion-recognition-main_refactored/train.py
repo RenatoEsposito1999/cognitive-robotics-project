@@ -25,7 +25,7 @@ from utils.precision import calculate_precision
         None
 
 '''
-def train_epoch_multimodal(epoch, data_loader_audio_video, model, criterion, optimizer, opt,
+def train_epoch_multimodal(epoch, data_loader_audio_video, model, criterion_loss, optimizer, opt,
                 epoch_logger, batch_logger, EEGData_train):
     print('train at epoch {}'.format(epoch))
 
@@ -60,13 +60,9 @@ def train_epoch_multimodal(epoch, data_loader_audio_video, model, criterion, opt
 
         targets = Variable(targets)
         
-        logits_output, aux_eeg_logits = model(audio_inputs, visual_inputs, EEG_inputs, opt.device)
+        logits_output = model(audio_inputs, visual_inputs, EEG_inputs, opt.device)
        
-        partial_loss = criterion(logits_output, targets)
-
-        eeg_loss = criterion(aux_eeg_logits,targets)
-
-        total_loss = partial_loss + 0.1 * eeg_loss
+        total_loss = criterion_loss(logits_output, targets)
                
         prec1 = calculate_precision(logits_output.data, targets.data)
     
@@ -76,6 +72,8 @@ def train_epoch_multimodal(epoch, data_loader_audio_video, model, criterion, opt
         optimizer.zero_grad() 
         total_loss.backward()
         optimizer.step()
+
+        torch.cuda.empty_cache()
         
         batch_time.update(time.time() - end_time)
         end_time = time.time()
@@ -109,11 +107,4 @@ def train_epoch_multimodal(epoch, data_loader_audio_video, model, criterion, opt
         'prec1': prec1_avarage.avg.item(),
         'lr': optimizer.param_groups[0]['lr']
     })
-    
-    
-
-
- 
-
-    
     
