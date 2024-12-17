@@ -27,6 +27,14 @@ from torch.optim import lr_scheduler
 
 '''
 def training_validation_processing(opt, model, criterion_loss, train_split_eeg, validation_split_eeg):
+    #Create the optimizer, the algorithm choosen is Adam
+    optimizer = optim.SGD(
+                model.parameters(),
+                lr=opt.learning_rate,
+                momentum=opt.momentum,
+                dampening=opt.dampening,
+                weight_decay=opt.weight_decay,
+                nesterov=False)
     
     if not opt.no_train:
     
@@ -58,15 +66,7 @@ def training_validation_processing(opt, model, criterion_loss, train_split_eeg, 
             os.path.join(opt.result_path, 'train_batch.log'),
             ['epoch', 'batch', 'iter', 'loss', 'prec1', 'lr'])
         
-        #Create the optimizer, the algorithm choosen is Adam
-        optimizer = optim.Adam(
-                        model.parameters(),
-                        lr=opt.learning_rate,
-                        betas=(0.9, 0.98),
-                        eps=1e-9,
-                        weight_decay=opt.weight_decay,
-                        amsgrad=True
-                    )
+        
     
         #This is the scheduler in order to have a dynamic learning rate    
         scheduler = lr_scheduler.StepLR(optimizer, 20, 0.1)

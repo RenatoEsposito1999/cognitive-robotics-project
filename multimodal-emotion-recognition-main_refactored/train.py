@@ -6,6 +6,7 @@ from torch.autograd import Variable
 import time
 from utils.average_meter import AverageMeter
 from utils.precision import calculate_precision
+import os
 
 '''
     This function perform the training for the i-th epoch.
@@ -46,21 +47,18 @@ def train_epoch_multimodal(epoch, data_loader_audio_video, model, criterion_loss
 
         audio_inputs, visual_inputs, targets = item1
         
-        eeg_inputs, mask_inputs = EEGData_train.generate_artificial_batch(targets) # tensor shape [batch_size,seq_len,features]
-         
         visual_inputs = visual_inputs.permute(0,2,1,3,4)
         visual_inputs = visual_inputs.reshape(visual_inputs.shape[0]*visual_inputs.shape[1], visual_inputs.shape[2], visual_inputs.shape[3], visual_inputs.shape[4])
+        eeg_inputs = EEGData_train.generate_artificial_batch(targets) # tensor shape [batch_size,seq_len,features]
         
+        #MOVE THE TENSORS ON GPU
         targets = targets.to(opt.device)
         eeg_inputs = eeg_inputs.to(opt.device)
-        mask_inputs = mask_inputs.to(opt.device)
-        audio_inputs = Variable(audio_inputs)
-        visual_inputs = Variable(visual_inputs)
-        EEG_inputs=Variable(eeg_inputs)
-
-        targets = Variable(targets)
+        visual_inputs = visual_inputs.to(opt.device)
+        audio_inputs = audio_inputs.to(opt.device)
+        #mask_inputs = mask_inputs.to(opt.device)
         
-        logits_output,aux_eeg_logits = model(audio_inputs, visual_inputs, EEG_inputs, opt.device)
+        logits_output = model(audio_inputs, visual_inputs, eeg_inputs, opt.device)
        
         total_loss = criterion_loss(logits_output, targets)
                
@@ -69,9 +67,27 @@ def train_epoch_multimodal(epoch, data_loader_audio_video, model, criterion_loss
         losses_avarage.update(total_loss.data, opt.batch_size)
         prec1_avarage.update(prec1, opt.batch_size)
        
-        optimizer.zero_grad() 
+        optimizer.zero_grad()
+        # Prima di un passo di ottimizzazione 
+        
+            
         total_loss.backward()
+        
+        # Controlla se i gradienti sono stati calcolati
+        '''for name, param in model.named_parameters():
+            if param.requires_grad:
+                if param.grad is not None:
+                    print(f"{name} grad after: {param.grad.mean().item()}")  # Stampa la media dei gradienti
+                else:
+                    print(f"{name} grad is None")'''
+        
+        
         optimizer.step()
+
+        # Confronta i pesi prima e dopo
+        '''    for name, param in model.named_parameters():
+            print(f"{name} weights after: {param.data.mean().item()}")'''
+        torch.cuda.empty_cache()
         
         batch_time.update(time.time() - end_time)
         end_time = time.time()
@@ -84,7 +100,10 @@ def train_epoch_multimodal(epoch, data_loader_audio_video, model, criterion_loss
             'prec1': prec1_avarage.val.item(),
             'lr': optimizer.param_groups[0]['lr']
         })
+        '''input("premi")
+        os.system("cls")'''
         if i % 10 ==0:
+            
             print('Epoch: [{0}][{1}/{2}]\t lr: {lr:.5f}\t'
                     'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                     'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
@@ -105,11 +124,4 @@ def train_epoch_multimodal(epoch, data_loader_audio_video, model, criterion_loss
         'prec1': prec1_avarage.avg.item(),
         'lr': optimizer.param_groups[0]['lr']
     })
-    
-    
-
-
- 
-
-    
     

@@ -11,7 +11,7 @@ sys.path.append(cartella_superiore)
 import opts
 opt = opts.parse_opts()
 
-root = opt.vido_audio_dataset_path
+root = "/home/v.mele/cognitive_robotics/datasets/RAVDESS"
 
 
 n_folds=1

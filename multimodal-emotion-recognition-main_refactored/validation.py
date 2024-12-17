@@ -42,25 +42,23 @@ def val_epoch_multimodal(EEGData_val, epoch, data_loader, model, criterion, opt,
         
         inputs_audio, inputs_visual, targets = item1
         
-        EEG_inputs, mask_inputs = EEGData_val.generate_artificial_batch(targets)
-     
-        targets = targets.to(opt.device)
-        EEG_inputs = EEG_inputs.to(opt.device)
-        mask_inputs = mask_inputs.to(opt.device)
-        
         inputs_visual = inputs_visual.permute(0,2,1,3,4)
         inputs_visual = inputs_visual.reshape(inputs_visual.shape[0]*inputs_visual.shape[1], inputs_visual.shape[2], inputs_visual.shape[3], inputs_visual.shape[4])
         
-        with torch.no_grad():
-            inputs_visual = Variable(inputs_visual)
-            inputs_audio = Variable(inputs_audio)
-            targets = Variable(targets)
-            EEG_inputs = Variable(EEG_inputs)
-            mask_inputs = Variable(mask_inputs)
-            
+        eeg_inputs = EEGData_val.generate_artificial_batch(targets)
+       
         
-        logits_output  = model(inputs_audio, inputs_visual, EEG_inputs, opt.device)
-          
+        #MOVE ALL TENSORS TO GPU
+        targets = targets.to(opt.device)
+        eeg_inputs = eeg_inputs.to(opt.device)
+        inputs_visual = inputs_visual.to(opt.device)
+        inputs_audio  = inputs_audio.to(opt.device)
+        #mask_inputs = mask_inputs.to(opt.device)
+        
+        with torch.no_grad():
+            logits_output = model(inputs_audio, inputs_visual, eeg_inputs, opt.device)
+        
+            
         total_loss = criterion(logits_output, targets)
 
         prec1 = calculate_precision(logits_output.data, targets.data)
@@ -69,6 +67,8 @@ def val_epoch_multimodal(EEGData_val, epoch, data_loader, model, criterion, opt,
         
         prec1_avarage.update(prec1, opt.batch_size)
         
+        torch.cuda.empty_cache()
+
         batch_time.update(time.time() - end_time)
         end_time = time.time()
 

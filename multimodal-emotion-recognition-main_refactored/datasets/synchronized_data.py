@@ -5,6 +5,8 @@ import numpy as np
 class Synchronized_data():
     def __init__(self, dataset):
         self.complete_dataset = self.split_dataset(dataset) #return list of datasets splitted by labels
+        self.dataset_backup = []
+        self.label_lists = {0: [-1], 1: [-1], 2: [-1], 3: [-1]}
         
         
     def split_dataset(self, dataset):
@@ -33,6 +35,10 @@ class Synchronized_data():
         
         complete_dataset = [dataset_0, dataset_1, dataset_2, dataset_3]
         
+        
+        self.dataset_backup = complete_dataset.copy()
+        
+        
         return complete_dataset 
     
     def pad_and_mask(self, sequence, max_length):
@@ -52,7 +58,7 @@ class Synchronized_data():
         for data in datas:
             max_sequence_length = max(data.shape[0], max_sequence_length)
         padded_data, masks = zip(*[self.pad_and_mask(data, max_sequence_length) for data in datas])
-            
+       
         # Convert to tensors
         padded_data = torch.tensor(padded_data, dtype=torch.float32)
         masks = torch.tensor(masks, dtype=torch.float32)
@@ -63,9 +69,44 @@ class Synchronized_data():
     def generate_artificial_batch(self, labels):
         batch = []
         for i in labels:
-            selection_list = self.complete_dataset[i]
-            random_index = torch.randint(0, len(selection_list), (1,)).item()  # Get a random index
-            random_element = selection_list[random_index][0]# Access the random element
+            #selection_list = self.complete_dataset[i]
+            
+            
+            '''
+            # Convert subset indices to a list if not already done
+            if isinstance(selection_list, torch.utils.data.Subset):
+                indices = list(selection_list.indices)
+            else:
+            
+                indices = selection_list  # If it's already a list
+            
+            # If selection_list is empty, restore from backup
+            if len(indices) == 0:
+                self.complete_dataset[i] = torch.utils.data.Subset(
+                    self.dataset_backup[i].dataset,  # Original dataset
+                    list(self.dataset_backup[i].indices)  # Backup indices
+                )
+                indices = list(self.complete_dataset[i].indices)'''
+            
+            # Select a random index
+            if (len(self.label_lists[i.item()]) == len(self.complete_dataset[i.item()])):
+                self.label_lists[i.item()] = [-1]
+            random_index = -1
+            while random_index in self.label_lists[i.item()]:
+                random_index = torch.randint(0, len(self.complete_dataset[i.item()]), (1,)).item()
+            self.label_lists[i.item()].append(random_index)
+            random_element = self.complete_dataset[i.item()][random_index][0]  # Access the random element
+            
+            # Remove the selected index
+            #indices.pop(random_index)
+            
+            # Update the subset with the modified indices
+            #self.complete_dataset[i] = torch.utils.data.Subset(selection_list.dataset, indices)
+            # Append the random element to the batch
             batch.append(random_element)
-        padded_data, masks = self.collate_fn(batch)
-        return padded_data, masks
+        
+        # Collate the batch
+        #padded_data, masks = self.collate_fn(batch)
+        batch = torch.stack(batch)
+        return batch
+

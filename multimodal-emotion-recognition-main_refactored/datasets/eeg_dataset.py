@@ -39,7 +39,11 @@ class EEGDataset(Dataset):
         for i in range(data_np.shape[0]):
             if i in channels_epoc_plus:
                 tmp.append(data_np[i])
-        data = torch.tensor(tmp, dtype=torch.float32).T
+        data = torch.tensor(tmp, dtype=torch.float32)
+        #data = torch.nn.functional.normalize(data)
+        mean = torch.mean(data, dim=1, keepdim=True)
+        std = torch.std(data, dim=1, keepdim=True)
+        data = (data - mean) / std
         label = torch.tensor(self.labels[idx], dtype=torch.long)
         
         return data, label
